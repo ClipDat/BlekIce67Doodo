@@ -8,96 +8,43 @@ CHECK_INTERVAL = 15
 
 
 def print_signal(signal):
-
     print("\n" + "=" * 60)
     print("SOL LIVE STRATEGY")
     print("=" * 60)
 
-    print(
-        f"Live Price:   "
-        f"${signal['price']:.4f}"
-    )
-
-    print(
-        f"Mark Price:   "
-        f"${signal['mark_price']:.4f}"
-    )
-
-    print(
-        f"5m Close:     "
-        f"${signal['candle_price']:.4f}"
-    )
-
-    print(
-        f"5m Candle:    "
-        f"{signal['last_candle_time']}"
-    )
-
-    print(
-        f"Direction:    "
-        f"{signal['action']}"
-    )
-
-    print(
-        f"Strength:     "
-        f"{signal['signal_strength']}"
-    )
-
-    print(
-        f"Score:        "
-        f"{signal['score']}"
-    )
-
-    print(
-        f"RSI:          "
-        f"{signal['rsi']:.2f}"
-    )
-
-    print(
-        f"ATR:          "
-        f"{signal['atr']:.4f}"
-    )
-
-    print(
-        f"Suggested SL: "
-        f"${signal['stop_loss']:.4f}"
-    )
-
-    print(
-        f"Suggested TP: "
-        f"${signal['take_profit']:.4f}"
-    )
+    print(f"Live Price:   ${signal['price']:.4f}")
+    print(f"Mark Price:   ${signal['mark_price']:.4f}")
+    print(f"5m Close:     ${signal['candle_price']:.4f}")
+    print(f"5m Candle:    {signal['last_candle_time']}")
+    print(f"Direction:    {signal['action']}")
+    print(f"Strength:     {signal['signal_strength']}")
+    print(f"Score:        {signal['score']}")
+    print(f"RSI:          {signal['rsi']:.2f}")
+    print(f"ATR:          {signal['atr']:.4f}")
+    print(f"Suggested SL: ${signal['stop_loss']:.4f}")
+    print(f"Suggested TP: ${signal['take_profit']:.4f}")
 
     print("\nReasons:")
 
     for reason in signal["reasons"]:
-        print(
-            f" - {reason}"
-        )
+        print(f" - {reason}")
 
 
 def main():
-
     print("\n" + "=" * 60)
     print("🔥 BITUNIX SOL LIVE BOT")
     print("=" * 60)
-
     print("REAL MONEY: YES")
     print("Strategy: HIGH-FREQUENCY SOL")
-    print("Decision engine: strategy_engine.py")
+    print("Leverage cycle: 2x -> 4x -> 8x -> 16x -> 32x")
+    print("WIN -> 2x")
+    print("32x LOSS -> 2x")
     print("Maximum trade duration: 5 minutes")
     print("Market check: every 15 seconds")
     print()
 
-    # ---------------------------------------------
-    # BITUNIX
-    # ---------------------------------------------
-
     client = BitunixClient()
-
-    trader = LiveTrader(
-        client
-    )
+    trader = LiveTrader(client)
 
     account = client.get_account()
 
@@ -108,128 +55,51 @@ def main():
 
     print(
         f"Position mode: "
-        f"{account['positionMode']}"
+        f"{account.get('positionMode')}"
     )
 
-    # ---------------------------------------------
-    # MAIN LOOP
-    # ---------------------------------------------
+    print(
+        f"Starting leverage level: "
+        f"{trader.current_leverage()}x"
+    )
 
     while True:
-
         try:
+            # First check whether an existing
+            # real Bitunix position is still open.
+            position_open = trader.sync()
 
-            # =====================================
-            # FIRST:
-            # CHECK REAL BITUNIX POSITION
-            # =====================================
-
-            position_open = (
-                trader.sync()
-            )
-
-            # =====================================
-            # BOT HALTED?
-            # =====================================
-
-            if trader.trading_halted:
-
-                print(
-                    "\n🛑 BOT ONLINE, "
-                    "BUT NEW TRADES ARE HALTED"
-                )
-
-                print(
-                    f"Reason: "
-                    f"{trader.halt_reason}"
-                )
-
-                time.sleep(
-                    60
-                )
-
-                continue
-
-            # =====================================
-            # NO POSITION:
-            # FIND NEXT DIRECTION
-            # =====================================
-
+            # If not, immediately look for another trade.
             if not position_open:
+                signal = analyse_sol()
 
-                signal = (
-                    analyse_sol()
-                )
+                print_signal(signal)
 
-                print_signal(
-                    signal
-                )
-
-                # strategy_engine almost always
-                # returns LONG or SHORT
-
-                if signal["action"] in [
-                    "LONG",
-                    "SHORT"
-                ]:
-
-                    opened = (
-                        trader.open_from_signal(
-                            signal
-                        )
-                    )
+                if signal["action"] in ("LONG", "SHORT"):
+                    opened = trader.open_from_signal(signal)
 
                     if not opened:
-
-                        print(
-                            "\nNo trade opened "
-                            "for this setup."
-                        )
+                        print("\nNo trade opened this cycle.")
 
                 else:
+                    print("\nNo actionable signal.")
 
-                    print(
-                        "\nNo actionable signal."
-                    )
-
-            # =====================================
-            # WAIT
-            # =====================================
-
-            time.sleep(
-                CHECK_INTERVAL
-            )
+            time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-
+            print("\n\nBot stopped manually.")
             print(
-                "\n\nBot stopped manually."
+                "An existing Bitunix position, if any, "
+                "remains managed by the exchange TP/SL."
             )
-
-            print(
-                "Any existing Bitunix position "
-                "remains on the exchange."
-            )
-
             break
 
         except Exception as error:
+            print("\n\n⚠️ LIVE BOT ERROR:")
+            print(error)
+            print("Retrying in 15 seconds...")
 
-            print(
-                "\n\nLIVE BOT ERROR:"
-            )
-
-            print(
-                error
-            )
-
-            print(
-                "Retrying in 15 seconds..."
-            )
-
-            time.sleep(
-                15
-            )
+            time.sleep(15)
 
 
 if __name__ == "__main__":
