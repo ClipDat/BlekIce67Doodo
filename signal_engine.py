@@ -1,8 +1,14 @@
 import json
+import os
 
-from ollama import chat
+from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import Literal
+
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 
 class TradeSignal(BaseModel):
@@ -74,30 +80,25 @@ Important rules:
    has not fully reacted yet.
 8. Confidence above 80 should be rare.
 9. Choose the SINGLE clearest opportunity.
-10. This is paper trading only.
+10. Return IGNORE if there is not enough information.
+11. Prefer missing a weak trade over forcing a bad trade.
 
-Return the result using the required JSON structure.
+Return the result using the required structure.
 """
 
-    response = chat(
-        model="qwen3:4b",
+    response = client.responses.parse(
+        model="gpt-5-nano",
 
-        messages=[
+        input=[
             {
                 "role": "user",
                 "content": prompt
             }
         ],
 
-        format=TradeSignal.model_json_schema(),
-
-        options={
-            "temperature": 0
-        }
+        text_format=TradeSignal
     )
 
-    signal = TradeSignal.model_validate_json(
-        response.message.content
-    )
+    signal = response.output_parsed
 
     return signal.model_dump()
