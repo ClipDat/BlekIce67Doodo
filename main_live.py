@@ -1,14 +1,10 @@
 import time
 
 from strategy_engine import analyse_sol
-
-from live_trader import (
-    BitunixClient,
-    LiveTrader
-)
+from live_trader import BitunixClient, LiveTrader
 
 
-CHECK_INTERVAL = 5
+CHECK_INTERVAL = 15
 
 
 def print_signal(signal):
@@ -18,44 +14,66 @@ def print_signal(signal):
     print("=" * 60)
 
     print(
-        f"Price:       "
+        f"Live Price:   "
         f"${signal['price']:.4f}"
     )
 
     print(
-        f"Direction:   "
+        f"Mark Price:   "
+        f"${signal['mark_price']:.4f}"
+    )
+
+    print(
+        f"5m Close:     "
+        f"${signal['candle_price']:.4f}"
+    )
+
+    print(
+        f"5m Candle:    "
+        f"{signal['last_candle_time']}"
+    )
+
+    print(
+        f"Direction:    "
         f"{signal['action']}"
     )
 
     print(
-        f"Strength:    "
+        f"Strength:     "
         f"{signal['signal_strength']}"
     )
 
     print(
-        f"Score:       "
+        f"Score:        "
         f"{signal['score']}"
     )
 
     print(
-        f"RSI:         "
+        f"RSI:          "
         f"{signal['rsi']:.2f}"
     )
 
     print(
-        f"ATR:         "
+        f"ATR:          "
         f"{signal['atr']:.4f}"
     )
 
     print(
-        f"Suggested SL:"
-        f" ${signal['stop_loss']:.4f}"
+        f"Suggested SL: "
+        f"${signal['stop_loss']:.4f}"
     )
 
     print(
-        f"Suggested TP:"
-        f" ${signal['take_profit']:.4f}"
+        f"Suggested TP: "
+        f"${signal['take_profit']:.4f}"
     )
+
+    print("\nReasons:")
+
+    for reason in signal["reasons"]:
+        print(
+            f" - {reason}"
+        )
 
 
 def main():
@@ -65,10 +83,15 @@ def main():
     print("=" * 60)
 
     print("REAL MONEY: YES")
-    print("Pair: SOLUSDT")
-    print("Maximum position time: 5 minutes")
-    print("Martingale: 1x → 2x → 4x → 8x → 16x → 32x → 64x")
+    print("Strategy: HIGH-FREQUENCY SOL")
+    print("Decision engine: strategy_engine.py")
+    print("Maximum trade duration: 5 minutes")
+    print("Market check: every 15 seconds")
     print()
+
+    # ---------------------------------------------
+    # BITUNIX
+    # ---------------------------------------------
 
     client = BitunixClient()
 
@@ -76,9 +99,7 @@ def main():
         client
     )
 
-    account = (
-        client.get_account()
-    )
+    account = client.get_account()
 
     print(
         f"Starting available USDT: "
@@ -90,23 +111,49 @@ def main():
         f"{account['positionMode']}"
     )
 
+    # ---------------------------------------------
+    # MAIN LOOP
+    # ---------------------------------------------
+
     while True:
 
         try:
 
-            # =========================================
+            # =====================================
             # FIRST:
-            # synchronize with REAL Bitunix positions
-            # =========================================
+            # CHECK REAL BITUNIX POSITION
+            # =====================================
 
             position_open = (
                 trader.sync()
             )
 
-            # =========================================
-            # IF NO POSITION:
-            # generate next trade immediately
-            # =========================================
+            # =====================================
+            # BOT HALTED?
+            # =====================================
+
+            if trader.trading_halted:
+
+                print(
+                    "\n🛑 BOT ONLINE, "
+                    "BUT NEW TRADES ARE HALTED"
+                )
+
+                print(
+                    f"Reason: "
+                    f"{trader.halt_reason}"
+                )
+
+                time.sleep(
+                    60
+                )
+
+                continue
+
+            # =====================================
+            # NO POSITION:
+            # FIND NEXT DIRECTION
+            # =====================================
 
             if not position_open:
 
@@ -118,9 +165,36 @@ def main():
                     signal
                 )
 
-                trader.open_from_signal(
-                    signal
-                )
+                # strategy_engine almost always
+                # returns LONG or SHORT
+
+                if signal["action"] in [
+                    "LONG",
+                    "SHORT"
+                ]:
+
+                    opened = (
+                        trader.open_from_signal(
+                            signal
+                        )
+                    )
+
+                    if not opened:
+
+                        print(
+                            "\nNo trade opened "
+                            "for this setup."
+                        )
+
+                else:
+
+                    print(
+                        "\nNo actionable signal."
+                    )
+
+            # =====================================
+            # WAIT
+            # =====================================
 
             time.sleep(
                 CHECK_INTERVAL
@@ -129,13 +203,12 @@ def main():
         except KeyboardInterrupt:
 
             print(
-                "\n\nBot stopped."
+                "\n\nBot stopped manually."
             )
 
             print(
-                "IMPORTANT: an open position "
-                "remains protected by Bitunix "
-                "TP/SL even though Python stopped."
+                "Any existing Bitunix position "
+                "remains on the exchange."
             )
 
             break
@@ -150,8 +223,13 @@ def main():
                 error
             )
 
-            # Don't spam API / orders after error
-            time.sleep(10)
+            print(
+                "Retrying in 15 seconds..."
+            )
+
+            time.sleep(
+                15
+            )
 
 
 if __name__ == "__main__":
