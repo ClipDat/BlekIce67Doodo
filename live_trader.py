@@ -9,49 +9,52 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-
 load_dotenv()
-
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 BASE_URL = "https://fapi.bitunix.com"
 SYMBOL = "SOLUSDT"
 MARGIN_COIN = "USDT"
 
 STATE_FILE = Path(
-    os.getenv(
-        "TRADER_STATE_FILE",
-        "live_trader_state.json"
-    )
+    os.getenv("TRADER_STATE_FILE", "live_trader_state.json")
 )
-
-# ============================================================
-# STRICT SYSTEM
-# ============================================================
 
 MARGIN_FRACTION = 0.50
 LEVERAGE_LEVELS = [2, 4, 8, 16, 32]
-TAKE_PROFIT_PERCENT = 0.005      # +0.5%
-STOP_LOSS_PERCENT = 0.0025      # -0.25%
+TAKE_PROFIT_PERCENT = 0.005   # 0.5%
+STOP_LOSS_PERCENT = 0.0025   # 0.25%
 MAX_TRADE_SECONDS = 300
 
 
-# ============================================================
-# BITUNIX CLIENT
-# ============================================================
+def leverage_after_loss(leverage):
+    leverage = int(leverage)
+    if leverage not in LEVERAGE_LEVELS:
+        raise ValueError(f"Unknown leverage: {leverage}x")
+    index = LEVERAGE_LEVELS.index(leverage)
+    return LEVERAGE_LEVELS[(index + 1) % len(LEVERAGE_LEVELS)]
+
+
+def leverage_after_normal_close(leverage, pnl):
+    if pnl > 0:
+        return 2
+    if pnl < 0:
+        return leverage_after_loss(leverage)
+    return int(leverage)
+
+
+def leverage_after_timeout(leverage, pnl):
+    if pnl < 0:
+        return leverage_after_loss(leverage)
+    return int(leverage)
+
 
 class BitunixClient:
-
     def __init__(self):
         self.api_key = os.getenv("BITUNIX_API_KEY")
         self.secret_key = os.getenv("BITUNIX_SECRET_KEY")
 
         if not self.api_key:
             raise Exception("BITUNIX_API_KEY missing")
-
         if not self.secret_key:
             raise Exception("BITUNIX_SECRET_KEY missing")
 
@@ -78,7 +81,7 @@ class BitunixClient:
             nonce,
             timestamp,
             params=params,
-            body=body
+            body=body,
         )
 
         return {
@@ -92,12 +95,11 @@ class BitunixClient:
 
     def private_get(self, path, params=None):
         params = params or {}
-
         response = requests.get(
             BASE_URL + path,
             params=params,
             headers=self._headers(params=params),
-            timeout=10
+            timeout=10,
         )
         response.raise_for_status()
         result = response.json()
@@ -109,12 +111,11 @@ class BitunixClient:
 
     def private_post(self, path, payload):
         body = json.dumps(payload, separators=(",", ":"))
-
         response = requests.post(
             BASE_URL + path,
             data=body,
             headers=self._headers(body=body),
-            timeout=10
+            timeout=10,
         )
         response.raise_for_status()
         result = response.json()
@@ -124,39 +125,29 @@ class BitunixClient:
 
         return result.get("data")
 
-    # ========================================================
-    # ACCOUNT
-    # ========================================================
-
     def get_account(self):
         data = self.private_get(
             "/api/v1/futures/account",
-            {"marginCoin": MARGIN_COIN}
+            {"marginCoin": MARGIN_COIN},
         )
 
         if isinstance(data, list):
             if not data:
                 raise Exception("USDT account not returned")
             return data[0]
-
         return data
 
     def get_balance(self):
         return float(self.get_account()["available"])
 
-    # ========================================================
-    # POSITIONS
-    # ========================================================
-
     def get_positions(self):
         data = self.private_get(
             "/api/v1/futures/position/get_pending_positions",
-            {"symbol": SYMBOL}
+            {"symbol": SYMBOL},
         )
 
         if isinstance(data, dict):
             return data.get("positionList", [])
-
         return data or []
 
     def get_history_position(self, position_id):
@@ -165,8 +156,8 @@ class BitunixClient:
             {
                 "symbol": SYMBOL,
                 "positionId": str(position_id),
-                "limit": 10
-            }
+                "limit": 10,
+            },
         )
 
         if not data:
@@ -182,18 +173,13 @@ class BitunixClient:
         for position in positions:
             if str(position.get("positionId")) == str(position_id):
                 return position
-
         return None
-
-    # ========================================================
-    # PAIR INFO
-    # ========================================================
 
     def get_pair_info(self):
         response = requests.get(
             BASE_URL + "/api/v1/futures/market/trading_pairs",
             params={"symbols": SYMBOL},
-            timeout=10
+            timeout=10,
         )
         response.raise_for_status()
         result = response.json()
@@ -204,31 +190,21 @@ class BitunixClient:
         data = result.get("data", [])
         if not data:
             raise Exception("SOLUSDT pair info missing")
-
         return data[0]
-
-    # ========================================================
-    # LEVERAGE
-    # ========================================================
 
     def set_leverage(self, leverage):
         leverage = int(leverage)
-
         if leverage not in LEVERAGE_LEVELS:
-            raise Exception(f"Invalid leverage level: {leverage}x")
+            raise Exception(f"Invalid strategy leverage: {leverage}x")
 
         return self.private_post(
             "/api/v1/futures/account/change_leverage",
             {
                 "marginCoin": MARGIN_COIN,
                 "symbol": SYMBOL,
-                "leverage": leverage
-            }
+                "leverage": leverage,
+            },
         )
-
-    # ========================================================
-    # ORDERS
-    # ========================================================
 
     def open_market_order(self, side, qty):
         account = self.get_account()
@@ -239,7 +215,7 @@ class BitunixClient:
             "qty": str(qty),
             "side": "BUY" if side == "LONG" else "SELL",
             "orderType": "MARKET",
-            "clientId": "solbot_" + uuid.uuid4().hex[:20]
+            "clientId": "solbot_" + uuid.uuid4().hex[:20],
         }
 
         if position_mode == "HEDGE":
@@ -247,7 +223,7 @@ class BitunixClient:
 
         return self.private_post(
             "/api/v1/futures/trade/place_order",
-            payload
+            payload,
         )
 
     def place_tp_sl(self, position_id, tp_price, sl_price):
@@ -259,27 +235,24 @@ class BitunixClient:
                 "tpPrice": str(tp_price),
                 "tpStopType": "LAST_PRICE",
                 "slPrice": str(sl_price),
-                "slStopType": "LAST_PRICE"
-            }
+                "slStopType": "LAST_PRICE",
+            },
         )
 
     def flash_close(self, position_id):
         return self.private_post(
             "/api/v1/futures/trade/flash_close_position",
-            {"positionId": str(position_id)}
+            {"positionId": str(position_id)},
         )
 
 
-# ============================================================
-# LIVE TRADER
-# ============================================================
-
 class LiveTrader:
-
     def __init__(self, client):
         self.client = client
 
-        self.leverage_index = 0
+        # This is the leverage the NEXT trade must use.
+        self.next_leverage = 2
+
         self.total_trades = 0
         self.wins = 0
         self.losses = 0
@@ -291,42 +264,12 @@ class LiveTrader:
 
         self.load_state()
 
-    # ========================================================
-    # LEVERAGE SYSTEM
-    # ========================================================
-
     def current_leverage(self):
-        return LEVERAGE_LEVELS[self.leverage_index]
-
-    def set_level_from_leverage(self, leverage):
-        leverage = int(leverage)
-        if leverage not in LEVERAGE_LEVELS:
-            raise Exception(f"Unknown strategy leverage: {leverage}x")
-        self.leverage_index = LEVERAGE_LEVELS.index(leverage)
-
-    def reset_to_2x(self):
-        self.leverage_index = 0
-
-    def advance_after_loss(self, closed_leverage):
-        """Advance from the leverage the CLOSED trade actually used."""
-        closed_leverage = int(closed_leverage)
-
-        if closed_leverage not in LEVERAGE_LEVELS:
-            raise Exception(
-                f"Cannot advance from unknown leverage {closed_leverage}x"
-            )
-
-        old_index = LEVERAGE_LEVELS.index(closed_leverage)
-        next_index = (old_index + 1) % len(LEVERAGE_LEVELS)
-        self.leverage_index = next_index
-
-    # ========================================================
-    # STATE
-    # ========================================================
+        return int(self.next_leverage)
 
     def save_state(self):
         state = {
-            "leverage_index": self.leverage_index,
+            "next_leverage": self.next_leverage,
             "total_trades": self.total_trades,
             "wins": self.wins,
             "losses": self.losses,
@@ -337,9 +280,12 @@ class LiveTrader:
         }
 
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
 
-        with open(STATE_FILE, "w") as file:
+        with open(temp_file, "w") as file:
             json.dump(state, file, indent=4)
+
+        os.replace(temp_file, STATE_FILE)
 
     def load_state(self):
         if not STATE_FILE.exists():
@@ -349,16 +295,14 @@ class LiveTrader:
         try:
             with open(STATE_FILE, "r") as file:
                 state = json.load(file)
-        except Exception:
-            print("⚠️ Could not read state. Starting at 2x.")
-            self.leverage_index = 0
-            self.save_state()
-            return
+        except Exception as error:
+            raise Exception(
+                f"State file exists but could not be read: {STATE_FILE}: {error}"
+            )
 
-        self.leverage_index = int(state.get("leverage_index", 0))
-
-        if not 0 <= self.leverage_index < len(LEVERAGE_LEVELS):
-            self.leverage_index = 0
+        self.next_leverage = int(state.get("next_leverage", 2))
+        if self.next_leverage not in LEVERAGE_LEVELS:
+            self.next_leverage = 2
 
         self.total_trades = int(state.get("total_trades", 0))
         self.wins = int(state.get("wins", 0))
@@ -371,51 +315,57 @@ class LiveTrader:
         if self.active_leverage is not None:
             self.active_leverage = int(self.active_leverage)
 
-    # ========================================================
-    # HELPERS
-    # ========================================================
-
     def floor_precision(self, value, precision):
         factor = 10 ** precision
         return math.floor(value * factor) / factor
 
     def wait_for_position(self, timeout=10):
         end = time.time() + timeout
-
         while time.time() < end:
             positions = self.client.get_positions()
             if positions:
                 return positions[0]
             time.sleep(0.25)
-
         return None
 
     def wait_until_closed(self, position_id, timeout=10):
         end = time.time() + timeout
-
         while time.time() < end:
             positions = self.client.get_positions()
             exists = any(
                 str(position.get("positionId")) == str(position_id)
                 for position in positions
             )
-
             if not exists:
                 return True
-
             time.sleep(0.25)
-
         return False
 
-    # ========================================================
-    # OPEN POSITION
-    # ========================================================
+    def recover_open_position(self, position):
+        position_id = str(position["positionId"])
+        leverage = int(float(position.get("leverage", 0)))
+
+        if leverage not in LEVERAGE_LEVELS:
+            raise Exception(
+                f"Open SOL position uses unexpected leverage {leverage}x. "
+                "Bot will not adopt it."
+            )
+
+        self.active_position_id = position_id
+        self.active_leverage = leverage
+        self.next_leverage = leverage
+        self.balance_before = None
+        self.pending_exit_reason = None
+        self.save_state()
+
+        print("\n♻️ RECOVERED OPEN POSITION FROM BITUNIX")
+        print(f"Position ID:       {position_id}")
+        print(f"Recovered leverage:{leverage}x")
 
     def open_from_signal(self, signal):
         positions = self.client.get_positions()
-
         if positions:
-            print("\n⚠️ SOL position already exists.")
+            print("\n⚠️ SOL position already exists. Not opening another.")
             return False
 
         balance = self.client.get_balance()
@@ -430,17 +380,17 @@ class LiveTrader:
 
         if leverage > exchange_max_leverage:
             raise Exception(
-                f"Bitunix maximum leverage is {exchange_max_leverage}x, "
-                f"but strategy requested {leverage}x."
+                f"Bitunix max leverage is {exchange_max_leverage}x; "
+                f"strategy requested {leverage}x"
             )
-
         if leverage < exchange_min_leverage:
             raise Exception(
-                f"Bitunix minimum leverage is {exchange_min_leverage}x."
+                f"Bitunix min leverage is {exchange_min_leverage}x; "
+                f"strategy requested {leverage}x"
             )
 
-        margin = balance * MARGIN_FRACTION
-        position_notional = margin * leverage
+        target_margin = balance * MARGIN_FRACTION
+        position_notional = target_margin * leverage
 
         base_precision = int(pair["basePrecision"])
         quote_precision = int(pair["quotePrecision"])
@@ -454,7 +404,6 @@ class LiveTrader:
 
         if qty < min_qty:
             minimum_margin_needed = min_qty * entry_reference / leverage
-
             if minimum_margin_needed > balance:
                 print("\n⚠️ Balance too small for Bitunix minimum order.")
                 return False
@@ -464,6 +413,7 @@ class LiveTrader:
 
         qty_string = f"{qty:.{base_precision}f}"
         actual_notional = qty * entry_reference
+        actual_margin = actual_notional / leverage
 
         self.client.set_leverage(leverage)
 
@@ -472,31 +422,26 @@ class LiveTrader:
         print("=" * 60)
         print(f"Direction:         {signal['action']}")
         print(f"Balance:           ${balance:.4f}")
-        print(f"Margin fraction:   {MARGIN_FRACTION * 100:.0f}%")
+        print(f"Target margin:     ${target_margin:.4f}")
+        print(f"Actual margin:     ${actual_margin:.4f}")
         print(f"Strategy leverage: {leverage}x")
         print(f"Position value:    ${actual_notional:.2f}")
         print(f"SOL quantity:      {qty_string}")
 
-        # Save the leverage THIS trade actually uses before sending the order.
         self.balance_before = balance
         self.active_leverage = leverage
         self.pending_exit_reason = None
         self.save_state()
 
-        order = self.client.open_market_order(
-            signal["action"],
-            qty_string
-        )
-
+        order = self.client.open_market_order(signal["action"], qty_string)
         print(f"Order ID:          {order.get('orderId')}")
 
         position = self.wait_for_position()
-
         if not position:
             self.balance_before = None
             self.active_leverage = None
             self.save_state()
-            raise Exception("Order sent but position did not appear.")
+            raise Exception("Order sent but position did not appear")
 
         position_id = str(position["positionId"])
         real_entry = float(position["avgOpenPrice"])
@@ -506,16 +451,13 @@ class LiveTrader:
             print("\n🚨 LEVERAGE MISMATCH")
             print(f"Requested: {leverage}x")
             print(f"Bitunix:   {real_leverage}x")
-
             self.client.flash_close(position_id)
             self.wait_until_closed(position_id)
-
             self.balance_before = None
             self.active_leverage = None
             self.save_state()
             return False
 
-        # Fixed TP/SL: +0.5% / -0.25%
         if signal["action"] == "LONG":
             real_tp = real_entry * (1 + TAKE_PROFIT_PERCENT)
             real_sl = real_entry * (1 - STOP_LOSS_PERCENT)
@@ -526,7 +468,6 @@ class LiveTrader:
         real_tp = round(real_tp, quote_precision)
         real_sl = round(real_sl, quote_precision)
 
-        # Simple liquidation sanity check.
         liq_price = 0.0
         try:
             liq_price = float(position.get("liqPrice", 0) or 0)
@@ -534,7 +475,6 @@ class LiveTrader:
             liq_price = 0.0
 
         unsafe_liquidation = False
-
         if liq_price > 0:
             if signal["action"] == "LONG" and liq_price >= real_sl:
                 unsafe_liquidation = True
@@ -546,33 +486,26 @@ class LiveTrader:
             print(f"Entry: ${real_entry:.4f}")
             print(f"SL:    ${real_sl:.4f}")
             print(f"Liq:   ${liq_price:.4f}")
-
             self.client.flash_close(position_id)
             self.wait_until_closed(position_id)
-
             self.balance_before = None
             self.active_leverage = None
             self.save_state()
             return False
 
         self.active_position_id = position_id
-        self.active_leverage = leverage
+        self.active_leverage = real_leverage
+        self.next_leverage = real_leverage
         self.save_state()
 
         try:
-            self.client.place_tp_sl(
-                position_id,
-                real_tp,
-                real_sl
-            )
+            self.client.place_tp_sl(position_id, real_tp, real_sl)
         except Exception as error:
             print("\n🚨 TP/SL FAILED")
             print(error)
             print("Closing position immediately.")
-
             self.pending_exit_reason = "ERROR_CLOSE"
             self.save_state()
-
             self.client.flash_close(position_id)
             self.wait_until_closed(position_id)
             self.finalize_trade(exit_reason="ERROR_CLOSE")
@@ -583,32 +516,25 @@ class LiveTrader:
         print(f"SL -0.25%:         ${real_sl}")
         print(f"Real leverage:     {real_leverage}x")
         print(f"Position ID:       {position_id}")
-
         return True
-
-    # ========================================================
-    # FINISH TRADE
-    # ========================================================
 
     def finalize_trade(self, exit_reason=None):
         position_id = self.active_position_id
-
         if not position_id:
             return
 
         closed_leverage = self.active_leverage
-
         if closed_leverage is None:
             closed_leverage = self.current_leverage()
-
         closed_leverage = int(closed_leverage)
+
+        if closed_leverage not in LEVERAGE_LEVELS:
+            raise Exception(f"Invalid closed leverage: {closed_leverage}x")
 
         if exit_reason is None:
             exit_reason = self.pending_exit_reason or "TP_SL"
 
         history = None
-
-        # Bitunix history can lag briefly after the close.
         for _ in range(20):
             history = self.client.get_history_position(position_id)
             if history:
@@ -618,48 +544,51 @@ class LiveTrader:
         new_balance = self.client.get_balance()
 
         if history:
-            # Official Bitunix field: realizedPNL excludes funding and fees.
             trade_pnl = float(history.get("realizedPNL", 0) or 0)
         elif self.balance_before is not None:
             trade_pnl = new_balance - float(self.balance_before)
         else:
-            trade_pnl = 0.0
+            raise Exception(
+                "Position closed but PnL could not be determined. "
+                "Refusing to change leverage state."
+            )
 
         self.total_trades += 1
-
-        # ----------------------------------------------------
-        # STRICT PROGRESSION
-        # ----------------------------------------------------
 
         if exit_reason == "TIMEOUT":
             if trade_pnl < 0:
                 result = "TIMEOUT LOSS"
                 self.losses += 1
-                self.advance_after_loss(closed_leverage)
             elif trade_pnl > 0:
                 result = "TIMEOUT PROFIT"
                 self.wins += 1
-                # Profit at timeout: stay at the SAME leverage.
-                self.set_level_from_leverage(closed_leverage)
             else:
                 result = "TIMEOUT BREAKEVEN"
-                self.set_level_from_leverage(closed_leverage)
+
+            self.next_leverage = leverage_after_timeout(
+                closed_leverage,
+                trade_pnl,
+            )
+
+        elif exit_reason == "ERROR_CLOSE":
+            result = "ERROR CLOSE"
+            # Technical close does not alter the progression.
+            self.next_leverage = closed_leverage
+
         else:
             if trade_pnl < 0:
                 result = "LOSS"
                 self.losses += 1
-                # Loss advances from the leverage the CLOSED trade used.
-                self.advance_after_loss(closed_leverage)
             elif trade_pnl > 0:
                 result = "WIN"
                 self.wins += 1
-                # Normal winning close resets to 2x.
-                self.reset_to_2x()
             else:
                 result = "BREAKEVEN"
-                self.set_level_from_leverage(closed_leverage)
 
-        next_leverage = self.current_leverage()
+            self.next_leverage = leverage_after_normal_close(
+                closed_leverage,
+                trade_pnl,
+            )
 
         self.active_position_id = None
         self.active_leverage = None
@@ -676,69 +605,59 @@ class LiveTrader:
         print(f"Trade PnL:        ${trade_pnl:.6f}")
         print(f"NEW BALANCE:      ${new_balance:.4f}")
         print(f"Wins / Losses:    {self.wins} / {self.losses}")
-        print(f"NEXT LEVERAGE:    {next_leverage}x")
-
-    # ========================================================
-    # SYNC
-    # ========================================================
+        print(f"NEXT LEVERAGE:    {self.next_leverage}x")
 
     def sync(self):
         positions = self.client.get_positions()
 
+        if len(positions) > 1:
+            raise Exception(
+                "More than one SOL position exists. Bot refuses to guess which one to manage."
+            )
+
         if positions:
+            position = positions[0]
+
             if not self.active_position_id:
+                self.recover_open_position(position)
+
+            elif str(position.get("positionId")) != str(self.active_position_id):
                 raise Exception(
-                    "SOL position exists on Bitunix but bot has no saved position ID."
+                    "Bitunix open position does not match saved bot position."
                 )
 
-            matching = None
-
-            for position in positions:
-                if str(position.get("positionId")) == str(self.active_position_id):
-                    matching = position
-                    break
-
-            if matching is None:
-                raise Exception(
-                    "Bitunix position does not match saved bot position."
-                )
-
-            real_leverage = int(float(matching.get("leverage", 0)))
-
+            real_leverage = int(float(position.get("leverage", 0)))
             if real_leverage not in LEVERAGE_LEVELS:
-                print("\n🚨 INVALID LEVERAGE DETECTED")
-                print(f"Bitunix reports {real_leverage}x")
-                print("Closing immediately.")
+                raise Exception(
+                    f"Unexpected live leverage {real_leverage}x. Bot will not manage it."
+                )
 
-                self.pending_exit_reason = "ERROR_CLOSE"
+            if self.active_leverage != real_leverage:
+                print(
+                    f"\n⚠️ State leverage {self.active_leverage}x differs from "
+                    f"Bitunix {real_leverage}x. Using Bitunix value."
+                )
+                self.active_leverage = real_leverage
+                self.next_leverage = real_leverage
                 self.save_state()
 
-                self.client.flash_close(self.active_position_id)
-                closed = self.wait_until_closed(self.active_position_id)
-
-                if closed:
-                    self.finalize_trade(exit_reason="ERROR_CLOSE")
-
-                return False
-
-            opened_at = int(matching["ctime"]) / 1000
+            opened_at = int(position["ctime"]) / 1000
             age = time.time() - opened_at
-            unrealized = float(matching.get("unrealizedPNL", 0) or 0)
+            unrealized = float(position.get("unrealizedPNL", 0) or 0)
 
             print(
-                f"\rLIVE {matching.get('side')} | "
+                f"\rLIVE {position.get('side')} | "
                 f"Lev {real_leverage}x | "
                 f"PnL ${unrealized:.4f} | "
                 f"Age {int(age)}s / {MAX_TRADE_SECONDS}s",
                 end="",
-                flush=True
+                flush=True,
             )
 
             if age >= MAX_TRADE_SECONDS:
                 print("\n\n⏱️ 5 MINUTES REACHED")
                 print("Closing position...")
 
-                # Store WHY it is being closed before sending close request.
                 self.pending_exit_reason = "TIMEOUT"
                 self.save_state()
 
@@ -746,16 +665,17 @@ class LiveTrader:
                 closed = self.wait_until_closed(self.active_position_id)
 
                 if not closed:
-                    raise Exception("Position did not close.")
+                    raise Exception("Position did not close")
 
                 self.finalize_trade(exit_reason="TIMEOUT")
                 return False
 
             return True
 
-        # No open position. If we still have an active id, TP/SL/manual close happened.
         if self.active_position_id:
             print("\nPosition closed on Bitunix.")
-            self.finalize_trade(exit_reason=self.pending_exit_reason or "TP_SL")
+            self.finalize_trade(
+                exit_reason=self.pending_exit_reason or "TP_SL"
+            )
 
         return False

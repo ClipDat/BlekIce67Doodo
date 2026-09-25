@@ -3,7 +3,6 @@ import time
 from strategy_engine import analyse_sol
 from live_trader import BitunixClient, LiveTrader
 
-
 CHECK_INTERVAL = 15
 
 
@@ -11,7 +10,6 @@ def print_signal(signal):
     print("\n" + "=" * 60)
     print("SOL LIVE STRATEGY")
     print("=" * 60)
-
     print(f"Live Price:   ${signal['price']:.4f}")
     print(f"Mark Price:   ${signal['mark_price']:.4f}")
     print(f"5m Close:     ${signal['candle_price']:.4f}")
@@ -21,9 +19,7 @@ def print_signal(signal):
     print(f"Score:        {signal['score']}")
     print(f"RSI:          {signal['rsi']:.2f}")
     print(f"ATR:          {signal['atr']:.4f}")
-
-    print("\nReasons:")
-
+    print("Reasons:")
     for reason in signal["reasons"]:
         print(f" - {reason}")
 
@@ -32,15 +28,16 @@ def main():
     print("\n" + "=" * 60)
     print("🔥 BITUNIX SOL LIVE BOT")
     print("=" * 60)
-
     print("REAL MONEY: YES")
     print("Strategy: HIGH-FREQUENCY SOL")
-    print("TP: 3%")
-    print("SL: 1.5%")
+    print("TP: 0.5%")
+    print("SL: 0.25%")
     print("Leverage: 2x -> 4x -> 8x -> 16x -> 32x")
-    print("WIN -> 2x")
-    print("32x LOSS -> 2x")
-    print("Margin: 50% of current available balance")
+    print("Normal WIN -> 2x")
+    print("LOSS -> next leverage; 32x LOSS -> 2x")
+    print("Timeout profit -> same leverage")
+    print("Timeout loss -> next leverage")
+    print("Margin target: 50% of current available balance")
     print("Maximum trade duration: 5 minutes")
     print("Market check: every 15 seconds")
     print()
@@ -49,21 +46,10 @@ def main():
     trader = LiveTrader(client)
 
     account = client.get_account()
-
-    print(
-        f"Starting available USDT: "
-        f"${float(account['available']):.4f}"
-    )
-
-    print(
-        f"Position mode: "
-        f"{account.get('positionMode')}"
-    )
-
-    print(
-        f"Starting leverage: "
-        f"{trader.current_leverage()}x"
-    )
+    print(f"State file: {str(__import__('live_trader').STATE_FILE)}")
+    print(f"Starting available USDT: ${float(account['available']):.4f}")
+    print(f"Position mode: {account.get('positionMode')}")
+    print(f"NEXT leverage from state: {trader.current_leverage()}x")
 
     while True:
         try:
@@ -71,7 +57,6 @@ def main():
 
             if not position_open:
                 signal = analyse_sol()
-
                 print_signal(signal)
 
                 if signal["action"] in ("LONG", "SHORT"):
