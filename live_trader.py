@@ -853,6 +853,7 @@ class LiveTrader:
             )
 
             qty = min_qty
+
         qty_string = (
             f"{qty:.{base_precision}f}"
         )
@@ -1255,28 +1256,7 @@ class LiveTrader:
                 or 0
             )
 
-            funding = float(
-                history.get(
-                    "funding",
-                    0
-                )
-                or 0
-            )
-
-            fee = float(
-                history.get(
-                    "fee",
-                    0
-                )
-                or 0
-            )
-
-            # fee is deducted.
-            net_pnl = (
-                realized_pnl
-                + funding
-                - abs(fee)
-            )
+            net_pnl = realized_pnl
 
         elif self.balance_before is not None:
             # Fallback.
