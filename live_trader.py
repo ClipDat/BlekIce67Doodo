@@ -816,13 +816,43 @@ class LiveTrader:
         )
 
         if qty < min_qty:
+
+            minimum_margin_needed = (
+                min_qty
+                * entry_reference
+                / leverage
+            )
+
+            if minimum_margin_needed > balance:
+
+                print(
+                    "\n⚠️ Balance too small even "
+                    "for Bitunix minimum order."
+                )
+
+                print(
+                    f"Minimum margin needed: "
+                    f"${minimum_margin_needed:.4f}"
+                )
+
+                print(
+                    f"Available balance: "
+                    f"${balance:.4f}"
+                )
+
+                return False
+
             print(
-                "\n⚠️ Quantity below "
+                "\n⚠️ Calculated position is below "
                 "Bitunix minimum."
             )
 
-            return False
+            print(
+                f"Using minimum allowed quantity: "
+                f"{min_qty} SOL"
+            )
 
+            qty = min_qty
         qty_string = (
             f"{qty:.{base_precision}f}"
         )
