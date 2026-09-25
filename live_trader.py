@@ -1168,7 +1168,7 @@ class LiveTrader:
     # FINISH TRADE
     # ========================================================
 
-    def finalize_trade(self):
+    def finalize_trade(self, exit_reason="TP_SL"):
         position_id = (
             self.active_position_id
         )
@@ -1229,31 +1229,69 @@ class LiveTrader:
         # STRICT LEVERAGE RULE
         # ----------------------------------------------------
 
-        if trade_pnl > 0:
+        # ========================================================
+# LEVERAGE RULES
+# ========================================================
 
-            result = "WIN"
+        if exit_reason == "TIMEOUT":
 
-            self.wins += 1
+            # ---------------------------------------------
+            # 5 MINUTE FORCED CLOSE
+            # ---------------------------------------------
 
-            # WIN -> 2x
-            self.register_win()
+            if trade_pnl > 0:
 
+                result = "TIMEOUT PROFIT"
 
-        elif trade_pnl < 0:
+                self.wins += 1
 
-            result = "LOSS"
+                # IMPORTANT:
+                # Small timeout profit does NOT reset leverage.
+                # Stay on current level.
 
-            self.losses += 1
+            elif trade_pnl < 0:
 
-            # LOSS:
-            # 2 -> 4 -> 8 -> 16 -> 32 -> 2
-            self.register_loss()
+                result = "TIMEOUT LOSS"
+
+                self.losses += 1
+
+                # Timeout loss -> next leverage.
+                self.register_loss()
+
+            else:
+
+                result = "TIMEOUT BREAKEVEN"
+
+                # Stay on same leverage.
 
 
         else:
 
-            result = "BREAKEVEN"
+            # ---------------------------------------------
+            # NORMAL TP / SL CLOSE
+            # ---------------------------------------------
 
+            if trade_pnl > 0:
+
+                result = "WIN"
+
+                self.wins += 1
+
+                # Proper winning trade -> reset to 2x.
+                self.register_win()
+
+            elif trade_pnl < 0:
+
+                result = "LOSS"
+
+                self.losses += 1
+
+                # Proper loss -> next leverage.
+                self.register_loss()
+
+            else:
+
+                result = "BREAKEVEN"
             # Keep current leverage.
 
 
@@ -1372,7 +1410,9 @@ class LiveTrader:
                 )
 
                 if closed:
-                    self.finalize_trade()
+                    self.finalize_trade(
+                    exit_reason="TIMEOUT"
+                )
 
                 return False
 
