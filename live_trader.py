@@ -31,13 +31,11 @@ STATE_FILE = Path(
 
 
 # ============================================================
-# YOUR MONEY MANAGEMENT SYSTEM
+# STRICT SYSTEM
 # ============================================================
 
-# Use 50% of CURRENT available balance as margin.
 MARGIN_FRACTION = 0.50
 
-# Exact leverage progression.
 LEVERAGE_LEVELS = [
     2,
     4,
@@ -46,9 +44,9 @@ LEVERAGE_LEVELS = [
     32,
 ]
 
-MAX_STRATEGY_LEVERAGE = 32
+TAKE_PROFIT_PERCENT = 0.03
+STOP_LOSS_PERCENT = 0.015
 
-# Maximum position lifetime.
 MAX_TRADE_SECONDS = 300
 
 
@@ -63,23 +61,17 @@ class BitunixClient:
         self.secret_key = os.getenv("BITUNIX_SECRET_KEY")
 
         if not self.api_key:
-            raise Exception(
-                "BITUNIX_API_KEY missing"
-            )
+            raise Exception("BITUNIX_API_KEY missing")
 
         if not self.secret_key:
-            raise Exception(
-                "BITUNIX_SECRET_KEY missing"
-            )
+            raise Exception("BITUNIX_SECRET_KEY missing")
 
-    # --------------------------------------------------------
-    # SIGNATURE
-    # --------------------------------------------------------
 
     def _sha256(self, value):
         return hashlib.sha256(
             value.encode("utf-8")
         ).hexdigest()
+
 
     def _signature(
         self,
@@ -116,6 +108,7 @@ class BitunixClient:
             + self.secret_key
         )
 
+
     def _headers(
         self,
         params=None,
@@ -143,9 +136,6 @@ class BitunixClient:
             "Content-Type": "application/json",
         }
 
-    # --------------------------------------------------------
-    # PRIVATE GET
-    # --------------------------------------------------------
 
     def private_get(
         self,
@@ -174,9 +164,6 @@ class BitunixClient:
 
         return result.get("data")
 
-    # --------------------------------------------------------
-    # PRIVATE POST
-    # --------------------------------------------------------
 
     def private_post(
         self,
@@ -208,6 +195,7 @@ class BitunixClient:
 
         return result.get("data")
 
+
     # ========================================================
     # ACCOUNT
     # ========================================================
@@ -230,12 +218,14 @@ class BitunixClient:
 
         return data
 
+
     def get_balance(self):
         account = self.get_account()
 
         return float(
             account["available"]
         )
+
 
     # ========================================================
     # POSITIONS
@@ -256,6 +246,7 @@ class BitunixClient:
             )
 
         return data or []
+
 
     def get_history_position(
         self,
@@ -289,10 +280,10 @@ class BitunixClient:
             if str(
                 position.get("positionId")
             ) == str(position_id):
-
                 return position
 
         return None
+
 
     # ========================================================
     # PAIR INFO
@@ -326,6 +317,7 @@ class BitunixClient:
 
         return data[0]
 
+
     # ========================================================
     # LEVERAGE
     # ========================================================
@@ -336,18 +328,9 @@ class BitunixClient:
     ):
         leverage = int(leverage)
 
-        # Absolute protection from accidental
-        # 100x / unexpected leverage.
         if leverage not in LEVERAGE_LEVELS:
             raise Exception(
-                f"Invalid strategy leverage: "
-                f"{leverage}x"
-            )
-
-        if leverage > MAX_STRATEGY_LEVERAGE:
-            raise Exception(
-                f"Leverage above strategy "
-                f"maximum: {leverage}x"
+                f"Invalid leverage level: {leverage}x"
             )
 
         return self.private_post(
@@ -359,8 +342,9 @@ class BitunixClient:
             }
         )
 
+
     # ========================================================
-    # OPEN MARKET ORDER
+    # OPEN ORDER
     # ========================================================
 
     def open_market_order(
@@ -402,6 +386,7 @@ class BitunixClient:
             payload
         )
 
+
     # ========================================================
     # TP / SL
     # ========================================================
@@ -434,8 +419,9 @@ class BitunixClient:
             }
         )
 
+
     # ========================================================
-    # CLOSE POSITION
+    # CLOSE
     # ========================================================
 
     def flash_close(
@@ -463,11 +449,6 @@ class LiveTrader:
     ):
         self.client = client
 
-        # 0 = 2x
-        # 1 = 4x
-        # 2 = 8x
-        # 3 = 16x
-        # 4 = 32x
         self.leverage_index = 0
 
         self.total_trades = 0
@@ -479,8 +460,9 @@ class LiveTrader:
 
         self.load_state()
 
+
     # ========================================================
-    # LEVERAGE PROGRESSION
+    # LEVERAGE SYSTEM
     # ========================================================
 
     def current_leverage(self):
@@ -488,13 +470,15 @@ class LiveTrader:
             self.leverage_index
         ]
 
+
     def register_win(self):
-        # Any WIN -> 2x
+        # ANY WIN -> 2x
         self.leverage_index = 0
 
+
     def register_loss(self):
-        # LOSS:
         # 2 -> 4 -> 8 -> 16 -> 32 -> 2
+
         if self.leverage_index >= (
             len(LEVERAGE_LEVELS) - 1
         ):
@@ -502,6 +486,7 @@ class LiveTrader:
 
         else:
             self.leverage_index += 1
+
 
     # ========================================================
     # STATE
@@ -543,6 +528,7 @@ class LiveTrader:
                 indent=4
             )
 
+
     def load_state(self):
         if not STATE_FILE.exists():
             self.save_state()
@@ -557,11 +543,13 @@ class LiveTrader:
 
         except Exception:
             print(
-                "⚠️ Could not read state file. "
+                "⚠️ Could not read state. "
                 "Starting at 2x."
             )
 
+            self.leverage_index = 0
             self.save_state()
+
             return
 
         self.leverage_index = int(
@@ -571,7 +559,6 @@ class LiveTrader:
             )
         )
 
-        # Protect against corrupted / old state.
         if (
             self.leverage_index < 0
             or self.leverage_index
@@ -612,6 +599,7 @@ class LiveTrader:
             )
         )
 
+
     # ========================================================
     # HELPERS
     # ========================================================
@@ -632,14 +620,12 @@ class LiveTrader:
             / factor
         )
 
+
     def wait_for_position(
         self,
         timeout=10
     ):
-        end = (
-            time.time()
-            + timeout
-        )
+        end = time.time() + timeout
 
         while time.time() < end:
             positions = (
@@ -653,15 +639,13 @@ class LiveTrader:
 
         return None
 
+
     def wait_until_closed(
         self,
         position_id,
         timeout=10
     ):
-        end = (
-            time.time()
-            + timeout
-        )
+        end = time.time() + timeout
 
         while time.time() < end:
             positions = (
@@ -686,6 +670,7 @@ class LiveTrader:
 
         return False
 
+
     # ========================================================
     # OPEN POSITION
     # ========================================================
@@ -694,10 +679,6 @@ class LiveTrader:
         self,
         signal
     ):
-        # ----------------------------------------------------
-        # DON'T STACK POSITIONS
-        # ----------------------------------------------------
-
         positions = (
             self.client.get_positions()
         )
@@ -709,8 +690,9 @@ class LiveTrader:
 
             return False
 
+
         # ----------------------------------------------------
-        # FRESH BALANCE
+        # REAL CURRENT BALANCE
         # ----------------------------------------------------
 
         balance = (
@@ -719,19 +701,21 @@ class LiveTrader:
 
         if balance <= 0:
             raise Exception(
-                "No available USDT balance"
+                "No available USDT"
             )
 
+
         # ----------------------------------------------------
-        # CURRENT LEVERAGE LEVEL
+        # CURRENT LEVERAGE
         # ----------------------------------------------------
 
         leverage = (
             self.current_leverage()
         )
 
+
         # ----------------------------------------------------
-        # PAIR INFORMATION
+        # PAIR LIMITS
         # ----------------------------------------------------
 
         pair = (
@@ -747,23 +731,22 @@ class LiveTrader:
         )
 
         if leverage > exchange_max_leverage:
-            print(
-                "\n⚠️ Bitunix does not allow "
-                f"{leverage}x for {SYMBOL}."
+            raise Exception(
+                f"Bitunix maximum leverage is "
+                f"{exchange_max_leverage}x, "
+                f"but strategy requested "
+                f"{leverage}x."
             )
-
-            return False
 
         if leverage < exchange_min_leverage:
-            print(
-                "\n⚠️ Strategy leverage is "
-                "below exchange minimum."
+            raise Exception(
+                f"Bitunix minimum leverage is "
+                f"{exchange_min_leverage}x."
             )
 
-            return False
 
         # ----------------------------------------------------
-        # MONEY MANAGEMENT
+        # 50% MARGIN
         # ----------------------------------------------------
 
         margin = (
@@ -775,6 +758,7 @@ class LiveTrader:
             margin
             * leverage
         )
+
 
         # ----------------------------------------------------
         # QUANTITY
@@ -815,8 +799,12 @@ class LiveTrader:
             base_precision
         )
 
-        if qty < min_qty:
 
+        # ----------------------------------------------------
+        # BITUNIX MINIMUM ORDER
+        # ----------------------------------------------------
+
+        if qty < min_qty:
             minimum_margin_needed = (
                 min_qty
                 * entry_reference
@@ -824,60 +812,43 @@ class LiveTrader:
             )
 
             if minimum_margin_needed > balance:
-
                 print(
-                    "\n⚠️ Balance too small even "
+                    "\n⚠️ Balance too small "
                     "for Bitunix minimum order."
-                )
-
-                print(
-                    f"Minimum margin needed: "
-                    f"${minimum_margin_needed:.4f}"
-                )
-
-                print(
-                    f"Available balance: "
-                    f"${balance:.4f}"
                 )
 
                 return False
 
             print(
-                "\n⚠️ Calculated position is below "
-                "Bitunix minimum."
-            )
-
-            print(
-                f"Using minimum allowed quantity: "
-                f"{min_qty} SOL"
+                "\n⚠️ Using Bitunix minimum "
+                f"quantity: {min_qty} SOL"
             )
 
             qty = min_qty
 
+
         qty_string = (
             f"{qty:.{base_precision}f}"
         )
+
 
         actual_notional = (
             qty
             * entry_reference
         )
 
-        actual_margin = (
-            actual_notional
-            / leverage
-        )
 
         # ----------------------------------------------------
-        # SET EXACT STRATEGY LEVERAGE
+        # SET EXACT LEVERAGE
         # ----------------------------------------------------
 
         self.client.set_leverage(
             leverage
         )
 
+
         # ----------------------------------------------------
-        # SHOW ORDER BEFORE SENDING
+        # PRINT
         # ----------------------------------------------------
 
         print("\n" + "=" * 60)
@@ -890,28 +861,13 @@ class LiveTrader:
         )
 
         print(
-            f"Signal:            "
-            f"{signal['signal_strength']}"
-        )
-
-        print(
             f"Balance:           "
             f"${balance:.4f}"
         )
 
         print(
-            f"Target margin:     "
-            f"${margin:.4f}"
-        )
-
-        print(
-            f"Actual margin:     "
-            f"${actual_margin:.4f}"
-        )
-
-        print(
-            f"Margin percent:    "
-            f"{MARGIN_FRACTION * 100:.0f}%"
+            f"Margin fraction:   "
+            f"50%"
         )
 
         print(
@@ -920,7 +876,7 @@ class LiveTrader:
         )
 
         print(
-            f"Position:          "
+            f"Position value:    "
             f"${actual_notional:.2f}"
         )
 
@@ -929,22 +885,13 @@ class LiveTrader:
             f"{qty_string}"
         )
 
-        print(
-            f"Current level:     "
-            f"{self.leverage_index + 1}/"
-            f"{len(LEVERAGE_LEVELS)}"
-        )
-
-        # ----------------------------------------------------
-        # SAVE BALANCE
-        # ----------------------------------------------------
 
         self.balance_before = balance
-
         self.save_state()
 
+
         # ----------------------------------------------------
-        # REAL MARKET ORDER
+        # OPEN REAL POSITION
         # ----------------------------------------------------
 
         order = (
@@ -959,8 +906,9 @@ class LiveTrader:
             f"{order.get('orderId')}"
         )
 
+
         # ----------------------------------------------------
-        # FIND REAL POSITION
+        # GET REAL POSITION
         # ----------------------------------------------------
 
         position = (
@@ -972,9 +920,10 @@ class LiveTrader:
             self.save_state()
 
             raise Exception(
-                "Order sent but no "
-                "position appeared."
+                "Order sent but position "
+                "did not appear."
             )
+
 
         position_id = str(
             position["positionId"]
@@ -993,8 +942,9 @@ class LiveTrader:
             )
         )
 
+
         # ----------------------------------------------------
-        # CRITICAL LEVERAGE CHECK
+        # LEVERAGE MUST MATCH EXACTLY
         # ----------------------------------------------------
 
         if real_leverage != leverage:
@@ -1010,10 +960,6 @@ class LiveTrader:
                 f"Bitunix:   {real_leverage}x"
             )
 
-            print(
-                "Closing immediately."
-            )
-
             self.client.flash_close(
                 position_id
             )
@@ -1027,54 +973,61 @@ class LiveTrader:
 
             return False
 
-        # ----------------------------------------------------
-        # SL / TP DISTANCES FROM STRATEGY_ENGINE
-        # ----------------------------------------------------
 
-        sl_distance = abs(
-            float(signal["price"])
-            - float(signal["stop_loss"])
-        )
-
-        tp_distance = abs(
-            float(signal["take_profit"])
-            - float(signal["price"])
-        )
+        # ----------------------------------------------------
+        # FIXED 3% TP / 1.5% SL
+        # ----------------------------------------------------
 
         if signal["action"] == "LONG":
-            real_sl = (
-                real_entry
-                - sl_distance
-            )
 
             real_tp = (
                 real_entry
-                + tp_distance
+                * (
+                    1
+                    + TAKE_PROFIT_PERCENT
+                )
+            )
+
+            real_sl = (
+                real_entry
+                * (
+                    1
+                    - STOP_LOSS_PERCENT
+                )
             )
 
         else:
-            real_sl = (
-                real_entry
-                + sl_distance
-            )
 
             real_tp = (
                 real_entry
-                - tp_distance
+                * (
+                    1
+                    - TAKE_PROFIT_PERCENT
+                )
             )
 
-        real_sl = round(
-            real_sl,
-            quote_precision
-        )
+            real_sl = (
+                real_entry
+                * (
+                    1
+                    + STOP_LOSS_PERCENT
+                )
+            )
+
 
         real_tp = round(
             real_tp,
             quote_precision
         )
 
+        real_sl = round(
+            real_sl,
+            quote_precision
+        )
+
+
         # ----------------------------------------------------
-        # LIQUIDATION SANITY CHECK
+        # LIQUIDATION CHECK
         # ----------------------------------------------------
 
         liq_price = 0.0
@@ -1091,21 +1044,24 @@ class LiveTrader:
         except Exception:
             liq_price = 0.0
 
-        liquidation_before_stop = False
+
+        unsafe_liquidation = False
 
         if liq_price > 0:
+
             if signal["action"] == "LONG":
                 if liq_price >= real_sl:
-                    liquidation_before_stop = True
+                    unsafe_liquidation = True
 
             else:
                 if liq_price <= real_sl:
-                    liquidation_before_stop = True
+                    unsafe_liquidation = True
 
-        if liquidation_before_stop:
+
+        if unsafe_liquidation:
             print(
-                "\n🚨 LIQUIDATION WOULD OCCUR "
-                "BEFORE STOP LOSS"
+                "\n🚨 Liquidation price is "
+                "inside the stop-loss range."
             )
 
             print(
@@ -1118,10 +1074,6 @@ class LiveTrader:
 
             print(
                 f"Liq:   ${liq_price:.4f}"
-            )
-
-            print(
-                "Closing immediately."
             )
 
             self.client.flash_close(
@@ -1137,8 +1089,9 @@ class LiveTrader:
 
             return False
 
+
         # ----------------------------------------------------
-        # SAVE REAL POSITION ID
+        # SAVE POSITION
         # ----------------------------------------------------
 
         self.active_position_id = (
@@ -1147,8 +1100,9 @@ class LiveTrader:
 
         self.save_state()
 
+
         # ----------------------------------------------------
-        # EXCHANGE-SIDE TP / SL
+        # PLACE TP / SL ON BITUNIX
         # ----------------------------------------------------
 
         try:
@@ -1160,7 +1114,7 @@ class LiveTrader:
 
         except Exception as error:
             print(
-                "\n🚨 COULD NOT PLACE TP/SL"
+                "\n🚨 TP/SL FAILED"
             )
 
             print(error)
@@ -1181,19 +1135,20 @@ class LiveTrader:
 
             return False
 
+
         print(
-            f"Real entry:        "
+            f"Entry:             "
             f"${real_entry:.4f}"
         )
 
         print(
-            f"STOP on Bitunix:   "
-            f"${real_sl}"
+            f"TP +3%:            "
+            f"${real_tp}"
         )
 
         print(
-            f"TARGET on Bitunix: "
-            f"${real_tp}"
+            f"SL -1.5%:          "
+            f"${real_sl}"
         )
 
         print(
@@ -1201,18 +1156,13 @@ class LiveTrader:
             f"{real_leverage}x"
         )
 
-        if liq_price > 0:
-            print(
-                f"Liquidation:       "
-                f"${liq_price:.4f}"
-            )
-
         print(
             f"Position ID:       "
             f"{position_id}"
         )
 
         return True
+
 
     # ========================================================
     # FINISH TRADE
@@ -1226,10 +1176,9 @@ class LiveTrader:
         if not position_id:
             return
 
+
         history = None
 
-        # Bitunix history can take a moment
-        # after a position closes.
         for _ in range(12):
             history = (
                 self.client.get_history_position(
@@ -1242,13 +1191,18 @@ class LiveTrader:
 
             time.sleep(0.5)
 
+
         new_balance = (
             self.client.get_balance()
         )
 
-        # Prefer actual closed-position PnL.
+
+        # ----------------------------------------------------
+        # RESULT
+        # ----------------------------------------------------
+
         if history:
-            realized_pnl = float(
+            trade_pnl = float(
                 history.get(
                     "realizedPNL",
                     0
@@ -1256,11 +1210,8 @@ class LiveTrader:
                 or 0
             )
 
-            net_pnl = realized_pnl
-
         elif self.balance_before is not None:
-            # Fallback.
-            net_pnl = (
+            trade_pnl = (
                 new_balance
                 - float(
                     self.balance_before
@@ -1268,23 +1219,28 @@ class LiveTrader:
             )
 
         else:
-            net_pnl = 0.0
+            trade_pnl = 0.0
+
 
         self.total_trades += 1
 
+
         # ----------------------------------------------------
-        # YOUR EXACT PROGRESSION
+        # STRICT LEVERAGE RULE
         # ----------------------------------------------------
 
-        if net_pnl > 0:
+        if trade_pnl > 0:
+
             result = "WIN"
 
             self.wins += 1
 
-            # ANY WIN -> 2x
+            # WIN -> 2x
             self.register_win()
 
-        elif net_pnl < 0:
+
+        elif trade_pnl < 0:
+
             result = "LOSS"
 
             self.losses += 1
@@ -1293,19 +1249,19 @@ class LiveTrader:
             # 2 -> 4 -> 8 -> 16 -> 32 -> 2
             self.register_loss()
 
+
         else:
+
             result = "BREAKEVEN"
 
-            # Keep same leverage on breakeven.
+            # Keep current leverage.
 
-        # ----------------------------------------------------
-        # CLEAR POSITION STATE
-        # ----------------------------------------------------
 
         self.active_position_id = None
         self.balance_before = None
 
         self.save_state()
+
 
         print("\n" + "=" * 60)
         print("🏁 LIVE TRADE FINISHED")
@@ -1317,18 +1273,13 @@ class LiveTrader:
         )
 
         print(
-            f"Net PnL:         "
-            f"${net_pnl:.4f}"
+            f"Trade PnL:       "
+            f"${trade_pnl:.4f}"
         )
 
         print(
             f"NEW BALANCE:     "
             f"${new_balance:.4f}"
-        )
-
-        print(
-            f"Trades:          "
-            f"{self.total_trades}"
         )
 
         print(
@@ -1341,8 +1292,9 @@ class LiveTrader:
             f"{self.current_leverage()}x"
         )
 
+
     # ========================================================
-    # SYNC WITH REAL BITUNIX POSITION
+    # SYNC
     # ========================================================
 
     def sync(self):
@@ -1350,22 +1302,20 @@ class LiveTrader:
             self.client.get_positions()
         )
 
-        # ----------------------------------------------------
-        # POSITION EXISTS
-        # ----------------------------------------------------
 
         if positions:
+
             if not self.active_position_id:
                 raise Exception(
-                    "A SOL position exists on Bitunix "
-                    "but the bot does not recognize it. "
-                    "Close/check it manually before "
-                    "letting the bot continue."
+                    "SOL position exists on Bitunix "
+                    "but bot has no saved position ID."
                 )
+
 
             matching = None
 
             for position in positions:
+
                 if str(
                     position.get(
                         "positionId"
@@ -1373,14 +1323,17 @@ class LiveTrader:
                 ) == str(
                     self.active_position_id
                 ):
+
                     matching = position
                     break
 
+
             if matching is None:
                 raise Exception(
-                    "Open Bitunix position does not "
+                    "Bitunix position does not "
                     "match saved bot position."
                 )
+
 
             real_leverage = int(
                 float(
@@ -1391,10 +1344,17 @@ class LiveTrader:
                 )
             )
 
-            # Never accept accidental >32x.
-            if real_leverage > MAX_STRATEGY_LEVERAGE:
+
+            # Only our five levels are valid.
+            if real_leverage not in LEVERAGE_LEVELS:
+
                 print(
-                    "\n🚨 LEVERAGE ABOVE 32x"
+                    "\n🚨 INVALID LEVERAGE DETECTED"
+                )
+
+                print(
+                    f"Bitunix reports "
+                    f"{real_leverage}x"
                 )
 
                 print(
@@ -1416,6 +1376,7 @@ class LiveTrader:
 
                 return False
 
+
             opened_at = (
                 int(
                     matching["ctime"]
@@ -1428,6 +1389,7 @@ class LiveTrader:
                 - opened_at
             )
 
+
             unrealized = float(
                 matching.get(
                     "unrealizedPNL",
@@ -1435,6 +1397,7 @@ class LiveTrader:
                 )
                 or 0
             )
+
 
             print(
                 f"\rLIVE "
@@ -1447,11 +1410,13 @@ class LiveTrader:
                 flush=True
             )
 
+
             # ------------------------------------------------
-            # 5-MINUTE EXIT
+            # 5 MINUTE EXIT
             # ------------------------------------------------
 
             if age >= MAX_TRADE_SECONDS:
+
                 print(
                     "\n\n⏱️ 5 MINUTES REACHED"
                 )
@@ -1472,26 +1437,28 @@ class LiveTrader:
 
                 if not closed:
                     raise Exception(
-                        "Close request sent but "
-                        "position is still open."
+                        "Position did not close."
                     )
 
                 self.finalize_trade()
 
                 return False
 
+
             return True
 
+
         # ----------------------------------------------------
-        # NO OPEN POSITION
+        # NO POSITION -> TP / SL / MANUAL CLOSE
         # ----------------------------------------------------
 
         if self.active_position_id:
-            # TP / SL / manual close happened.
+
             print(
                 "\nPosition closed on Bitunix."
             )
 
             self.finalize_trade()
+
 
         return False
