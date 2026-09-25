@@ -565,10 +565,20 @@ class LiveTrader:
             else:
                 result = "TIMEOUT BREAKEVEN"
 
-            self.next_leverage = leverage_after_timeout(
-                closed_leverage,
-                trade_pnl,
-            )
+            # next_leverage was already locked
+            # before the timeout close.
+            if trade_pnl < 0:
+                result = "TIMEOUT LOSS"
+                self.losses += 1
+            else:
+                result = (
+                    "TIMEOUT PROFIT"
+                    if trade_pnl > 0
+                    else "TIMEOUT BREAKEVEN"
+                )
+
+                if trade_pnl > 0:
+                    self.wins += 1
 
         elif exit_reason == "ERROR_CLOSE":
             result = "ERROR CLOSE"
@@ -659,18 +669,48 @@ class LiveTrader:
                 print("Closing position...")
 
                 self.pending_exit_reason = "TIMEOUT"
+
+                # LOCK next leverage BEFORE closing.
+                if unrealized < 0:
+                    self.next_leverage = leverage_after_loss(
+                        real_leverage
+                    )
+
+                else:
+                    # Profit or breakeven at timeout:
+                    # stay on SAME leverage.
+                    self.next_leverage = real_leverage
+
                 self.save_state()
 
-                self.client.flash_close(self.active_position_id)
-                closed = self.wait_until_closed(self.active_position_id)
+                print(
+                    f"Timeout PnL:       "
+                    f"${unrealized:.6f}"
+                )
+
+                print(
+                    f"Locked leverage:   "
+                    f"{self.next_leverage}x"
+                )
+
+                self.client.flash_close(
+                    self.active_position_id
+                )
+
+                closed = self.wait_until_closed(
+                    self.active_position_id
+                )
 
                 if not closed:
-                    raise Exception("Position did not close")
+                    raise Exception(
+                        "Position did not close"
+                    )
 
-                self.finalize_trade(exit_reason="TIMEOUT")
+                self.finalize_trade(
+                    exit_reason="TIMEOUT"
+                )
+
                 return False
-
-            return True
 
         if self.active_position_id:
             print("\nPosition closed on Bitunix.")
