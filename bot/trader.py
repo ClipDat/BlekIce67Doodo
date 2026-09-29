@@ -39,6 +39,7 @@ class Trader:
                                  settings.smc_min_score, settings.smc_entry_tolerance)
         self._last_candle_fetch = 0.0
         self._last_status_log = 0.0
+        self._last_balance_log = 0.0
         self._entry_reason = ""
 
         # Persistent state: survives in-process restarts (and container restarts
@@ -295,9 +296,26 @@ class Trader:
         self._save()
 
     # ------------------------------------------------------------------ #
+    def _log_balance_heartbeat(self, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_balance_log < self.cfg.balance_log_seconds:
+            return
+        self._last_balance_log = now
+        balance = self._current_balance()
+        tag = "PAPER" if self.paper else "LIVE"
+        if self._session_start_balance:
+            pnl_pct = (balance / self._session_start_balance - 1) * 100
+            self.log.info("[%s] balance=$%.2f (%+.1f%% vs session start $%.2f) | leverage rung=%dx",
+                          tag, balance, pnl_pct, self._session_start_balance, self.ladder.current)
+        else:
+            self.log.info("[%s] balance=$%.2f | leverage rung=%dx", tag, balance, self.ladder.current)
+
+    # ------------------------------------------------------------------ #
     def run_forever(self) -> None:
         self._bootstrap()
+        self._log_balance_heartbeat(force=True)
         while True:
+            self._log_balance_heartbeat()
             if self._has_open_position():
                 self.log.info("Open position found - managing it before opening a new one.")
                 self._manage_open_position()

@@ -76,11 +76,22 @@ class SmcSignal:
             return "SMC: no candle data yet"
         if a.trend is None:
             return f"SMC: no market structure yet ({a.n} candles)"
+
+        last_break = next((e for e in reversed(a.events) if e.kind in ("BOS", "CHoCH")), None)
+        break_txt = f"last break={last_break.kind}@{last_break.level:.4f}" if last_break else "no break yet"
+
         zones = [z for z in a.zones if self._usable(z, a.trend)]
-        text = f"SMC: trend={a.trend} | {len(zones)} usable {a.trend} zone(s) | price={price:.4f}"
+        n_fvg = sum(1 for z in zones if z.kind == "FVG")
+        n_ob = sum(1 for z in zones if z.kind == "OB")
+        all_ob = sum(1 for z in a.zones if z.kind == "OB")
+        all_fvg = sum(1 for z in a.zones if z.kind == "FVG")
+
+        text = (f"SMC: trend={a.trend} ({break_txt}) | zones total: {all_fvg} FVG / {all_ob} OB "
+               f"| usable {a.trend}: {n_fvg} FVG / {n_ob} OB | price={price:.4f}")
         if zones:
             def dist(z: Zone) -> float:
                 return 0.0 if z.low <= price <= z.high else min(abs(price - z.low), abs(price - z.high)) / price
-            z = min(zones, key=dist)
-            text += f" | nearest {z.kind} {z.low:.4f}-{z.high:.4f} ({dist(z) * 100:.2f}% away)"
+            nearest = sorted(zones, key=dist)[:2]
+            text += " | nearest: " + ", ".join(
+                f"{z.kind} {z.low:.4f}-{z.high:.4f} ({dist(z) * 100:.2f}%)" for z in nearest)
         return text

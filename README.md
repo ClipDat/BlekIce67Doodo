@@ -5,7 +5,7 @@
 - margin = **50% от баланса** на всяка сделка (`MARGIN_FRACTION`)
 - TP **+1%** / SL **-0.5%** (за SHORT е обратното) — `TP_PCT`, `SL_PCT`
 - ливъридж стълба **2x → 4x → 8x → 16x → 32x → 64x**: загуба = следващото стъпало (загуба на 64x → пак 2x); печалба = винаги обратно на 2x
-- посока: две стратегии за избор (`STRATEGY=ema` или `STRATEGY=smc`, виж по-долу)
+- посока: две стратегии за избор (`STRATEGY=ema` или `STRATEGY=smc`, виж по-долу). SMC засича FVG/OB/BOS на таймфрейма от `SMC_TIMEFRAME` (по подразбиране **5m**, местят се с 1m/15m/30m/1h/...).
 - след затваряне → пауза 5 сек → нова сделка, безкраен цикъл
 
 ## Два режима
@@ -49,11 +49,13 @@ caffeinate -i python3 main.py
 
 При `STRATEGY=ema` първите ~21 минути ботът събира цени; при `smc` изтегля последните 200 свещи веднага.
 
-## Как да четеш резултатите (paper)
+## Как да следиш баланса
 
-- В конзолата след всяка сделка има ред `PAPER | balance=... | win-rate=... | max-loss-streak=... | max-drawdown=...`
-- `paper_trades.csv` — всяка сделка (отваря се в Numbers/Excel)
-- `bot_state.json` — състоянието; изтрий го, за да почнеш наново с 100$
+- На всеки `BALANCE_LOG_SECONDS` (по подразбиране 5 мин.) в лога излиза ред `[PAPER] balance=$... (+X% vs session start $...) | leverage rung=...x` — така знаеш баланса дори докато ботът чака сетъп, не само след сделка.
+- След всяка затворена сделка има и по-подробен ред: `PAPER | balance=... | win-rate=... | max-loss-streak=... | max-drawdown=...`
+- В Railway: Project → твоят service → таб **Logs**, най-новите редове са отдолу.
+- `paper_trades.csv` — история на всяка сделка. На Railway е на volume-a (не се вижда директно в браузъра); за да го изтеглиш: `railway link` после `railway run cat paper_trades.csv > paper_trades.csv` от терминала на Mac-а (изисква `railway` CLI: `npm i -g @railway/cli` или `brew install railway`).
+- `bot_state.json` — състоянието (баланс, стъпало на ливъридж); изтрий го (или volume-a), за да почнеш наново с 100$.
 
 По подразбиране `MAX_DRAWDOWN_FRACTION=0.5` спира бота при -50%. Сложи `0`, ако искаш да видиш paper акаунта докрай.
 

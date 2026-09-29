@@ -96,6 +96,7 @@ class Settings:
     # --- Operational ------------------------------------------------------------
     position_poll_seconds: float = field(default_factory=lambda: _env_float("POSITION_POLL_SECONDS", 3.0))
     post_trade_pause_seconds: float = field(default_factory=lambda: _env_float("POST_TRADE_PAUSE_SECONDS", 5.0))
+    balance_log_seconds: float = field(default_factory=lambda: _env_float("BALANCE_LOG_SECONDS", 300.0))
     # REAL_MONEY=false (default) -> paper trading: virtual money, real live prices, no API keys.
     # REAL_MONEY=true            -> REAL orders on Bitunix with real money.
     paper_trading: bool = field(default_factory=lambda: not _REAL_MONEY)
