@@ -1,4 +1,2 @@
-requests
-python-dotenv
-pydantic
-openai
+requests>=2.31,<3
+python-dotenv>=1.0,<2
